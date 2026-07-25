@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QJsonArray>
 
 // Для интерфейса
 class QTextEdit;
@@ -33,6 +34,9 @@ private:
 
     // Сетевой менеджер
     QNetworkAccessManager *manager_;
+
+    // История сообщений
+    QJsonArray history_;
 
     void CreateUI();
 };
