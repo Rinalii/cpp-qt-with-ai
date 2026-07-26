@@ -1,7 +1,9 @@
 #include "mainwindow.h"
 
 // Для интерфейса
+#include <QListWidget>
 #include <QTextEdit>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -22,9 +24,9 @@
 
 void MainWindow::CreateUI() {
     // Создаём элементы интерфейса
-    chat_display_ = new QTextEdit(this);
-    chat_display_->setReadOnly(true);                                   // Только для чтения
-    chat_display_->setPlaceholderText("Здесь будет диалог с AI...");
+    chat_display_ = new QListWidget(this);
+    chat_display_->setUniformItemSizes(false);
+    chat_display_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
 
     input_question_ = new QLineEdit(this);
     input_question_->setPlaceholderText("Введите вопрос...");
@@ -44,6 +46,80 @@ void MainWindow::CreateUI() {
     QVBoxLayout *main_layout = new QVBoxLayout(central);
     main_layout->addWidget(chat_display_);
     main_layout->addLayout(bottom_layout);
+}
+
+void MainWindow::AddMessage(const QString &text, bool isUser) {
+    QWidget *container = new QWidget();
+    QHBoxLayout *container_layout = new QHBoxLayout(container);
+    container_layout->setContentsMargins(10, 5, 10, 5);
+
+    QFrame *bubble = new QFrame();
+    bubble->setFrameShape(QFrame::NoFrame);
+    QString bgColor = isUser ? "#DCF8C6" : "#FFFFFF";
+    QString borderColor = isUser ? "#8BC34A" : "#E0E0E0";
+
+    bubble->setStyleSheet(QString(
+                              "background-color: %1; "
+                              "border-radius: 15px; "
+                              "border: none; "
+                              "padding: 0px;"
+                              ).arg(bgColor));
+
+    QLabel *label = new QLabel();
+    label->setTextFormat(Qt::MarkdownText);
+    label->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    label->setWordWrap(true);
+    label->setText(text);
+    label->setStyleSheet("background: transparent; color: black; margin: 0px; padding: 8px;");
+    label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+
+    // Ограничиваем максимальную ширину - 70% от ширины списка
+    int maxWidth = chat_display_->width() * 0.7;
+    if (maxWidth < 50) maxWidth = 50;                   // защита от нуля
+    label->setMaximumWidth(maxWidth);
+
+    // Layout для bubble
+    QVBoxLayout *bubble_layout = new QVBoxLayout(bubble);
+    bubble_layout->setContentsMargins(0, 0, 0, 0);
+    bubble_layout->addWidget(label);
+
+    // Выравнивание
+    if (isUser) {
+        container_layout->addStretch();
+        container_layout->addWidget(bubble);
+    } else {
+        container_layout->addWidget(bubble);
+        container_layout->addStretch();
+    }
+
+    // Добавляем в список
+    QListWidgetItem *item = new QListWidgetItem(chat_display_);
+    item->setSizeHint(container->sizeHint());
+    chat_display_->setItemWidget(item, container);
+
+    // Принудительно обновляем геометрию, чтобы label получил актуальный размер
+    container->adjustSize();
+    chat_display_->scrollToBottom();
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event) {
+    QMainWindow::resizeEvent(event);
+    int max_width = chat_display_->width() * 0.7;
+    if (max_width < 50) max_width = 50;
+
+    for (int i = 0; i < chat_display_->count(); ++i) {
+        QListWidgetItem *item = chat_display_->item(i);
+        QWidget *widget = chat_display_->itemWidget(item);
+        if (!widget) continue;
+        // Ищем QLabel внутри container
+        QLabel *label = widget->findChild<QLabel*>();
+        if (label) {
+            label->setMaximumWidth(max_width);
+        }
+        // Обновляем размер элемента
+        widget->adjustSize();
+        item->setSizeHint(widget->sizeHint());
+    }
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -85,7 +161,7 @@ void MainWindow::slotSendButtonClicked() {
     input_question_->clear();
 
     // Показываем вопрос пользователя в чате
-    chat_display_->append("Вы: " + user_input);
+    AddMessage(user_input, true);
     button_send_question_->setEnabled(false); // Блокируем кнопку на время ожидания
 
     // Добавляем новый вопрос пользователя в историю
@@ -119,7 +195,7 @@ void MainWindow::slotReplyFinished(QNetworkReply *reply) {
             QJsonObject message = obj["message"].toObject();
             QString answer = message["content"].toString();
             if (!answer.isEmpty()) {
-                chat_display_->append("AI: " + answer);
+                AddMessage(answer, false);
 
                 // Добавляем ответ ассистента в историю
                 QJsonObject assistant_msg;
@@ -132,14 +208,14 @@ void MainWindow::slotReplyFinished(QNetworkReply *reply) {
                     history_.removeAt(1);
                 }
             } else {
-                chat_display_->append("AI: [пустой ответ]");
+                AddMessage("[пустой ответ]", false);
             }
         } else {
-            chat_display_->append("Ошибка: не удалось разобрать JSON");
+            AddMessage("Ошибка: Не удалось разобрать JSON", false);
         }
     } else {
-        chat_display_->append("Ошибка соединения: " + reply->errorString());
-        chat_display_->append("Убедитесь, что Ollama запущен и модель загружена.");
+        AddMessage("Соединение с Ollama не удалось: " + reply->errorString() +
+                                 "\nУбедитесь, что Ollama запущен и модель загружена.", false);
     }
 
     button_send_question_->setEnabled(true); // Разблокируем кнопку
