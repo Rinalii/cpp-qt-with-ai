@@ -3,12 +3,15 @@
 
 #include <QMainWindow>
 #include <QJsonArray>
+#include <QNetworkReply>
 
 // Для интерфейса
 class QListWidget;
 class QLineEdit;
 class QPushButton;
 class QVBoxLayout;
+class QListWidgetItem;
+class QLabel;
 
 // Для работы с нейросетями
 class QNetworkAccessManager;
@@ -27,7 +30,11 @@ protected:
 
 private slots:
     void slotSendButtonClicked();                   // Отправка вопроса нейросетке по клику
-    void slotReplyFinished(QNetworkReply *reply);   // Обработка ответа от AI
+
+    // Обработка ответа от AI
+    void slotReadyRead();
+    void slotStreamFinished();
+    void slotStreamError(QNetworkReply::NetworkError code);
 
 private:
     // Виджеты интерфейса
@@ -41,8 +48,18 @@ private:
     // История сообщений
     QJsonArray history_;
 
+    // Для потокового получения ответа
+    QNetworkReply *current_reply_ = nullptr;
+    QString accumulated_answer_;
+    QListWidgetItem *current_item_ = nullptr;   // элемент списка для обновляемого сообщения
+    QWidget *current_container_ = nullptr;
+    QLabel *current_label_ = nullptr;
+    QByteArray read_buffer_;                    // буфер для неполных строк
+
+
     void CreateUI();
     void AddMessage(const QString &text, bool isUser);
+    void CreateOrUpdateAssistantMessage(const QString &text);
 };
 
 #endif // MAINWINDOW_H
