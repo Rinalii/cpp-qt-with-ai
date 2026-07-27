@@ -52,42 +52,32 @@ void MainWindow::AddMessage(const QString &text, bool isUser) {
     QHBoxLayout *container_layout = new QHBoxLayout(container);
     container_layout->setContentsMargins(10, 5, 10, 5);
 
-    QFrame *bubble = new QFrame();
-    bubble->setFrameShape(QFrame::NoFrame);
-    QString bgColor = isUser ? "#DCF8C6" : "#FFFFFF";
-    QString borderColor = isUser ? "#8BC34A" : "#E0E0E0";
-
-    bubble->setStyleSheet(QString(
-                              "background-color: %1; "
-                              "border-radius: 15px; "
-                              "border: none; "
-                              "padding: 0px;"
-                              ).arg(bgColor));
-
     QLabel *label = new QLabel();
     label->setTextFormat(Qt::MarkdownText);
     label->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     label->setWordWrap(true);
     label->setText(text);
-    label->setStyleSheet("background: transparent; color: black; margin: 0px; padding: 8px;");
-    label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+
+    QString bgColor = isUser ? "#DCF8C6" : "#FFFFFF";
+    label->setStyleSheet(QString(
+                             "background-color: %1; "
+                             "border-radius: 15px; "
+                             "padding: 8px; "
+                             "color: black;"
+                             ).arg(bgColor));
 
     // Ограничиваем максимальную ширину - 70% от ширины списка
     int maxWidth = chat_display_->width() * 0.7;
     if (maxWidth < 50) maxWidth = 50;                   // защита от нуля
     label->setMaximumWidth(maxWidth);
-
-    // Layout для bubble
-    QVBoxLayout *bubble_layout = new QVBoxLayout(bubble);
-    bubble_layout->setContentsMargins(0, 0, 0, 0);
-    bubble_layout->addWidget(label);
+    label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
 
     // Выравнивание
     if (isUser) {
         container_layout->addStretch();
-        container_layout->addWidget(bubble);
+        container_layout->addWidget(label);
     } else {
-        container_layout->addWidget(bubble);
+        container_layout->addWidget(label);
         container_layout->addStretch();
     }
 
@@ -120,7 +110,6 @@ void MainWindow::CreateOrUpdateAssistantMessage(const QString &text) {
         chat_display_->scrollToBottom();
     }
 }
-
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
