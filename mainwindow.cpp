@@ -140,8 +140,9 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , manager_(new QNetworkAccessManager(this))
-    , history_(QJsonArray()) {
+    , ai_manager_(new AIManager("http://localhost:11434", "gemma-4-12b-local", this)) {
+
+    history_ = new ChatHistory("You're an AI assistant. Be nice, keep up the conversation, answer the user's questions.", this);
 
     CreateUI();
 
@@ -150,16 +151,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(button_send_question_, &QPushButton::clicked, this, &MainWindow::slotSendButtonClicked);
     connect(input_question_, &QLineEdit::returnPressed, this, &MainWindow::slotSendButtonClicked);
 
+    connect(ai_manager_, &AIManager::signalChunkReceived, this, &MainWindow::slotChunkReceived);
+    connect(ai_manager_, &AIManager::signalResponseFinished, this, &MainWindow::slotResponseFinished);
+    connect(ai_manager_, &AIManager::signalErrorOccurred, this, &MainWindow::slotErrorOccurred);
+
     // Устанавливаем размер окна
     resize(600, 400);
-
-    // Добавляем системное сообщение один раз в начале истории
-    QJsonObject system_msg;
-    system_msg["role"] = "system";
-    system_msg["content"] =
-        "You're an AI assistant. Be nice, keep up the conversation, answer the user's questions.";
-
-    history_.append(system_msg);
 }
 
 MainWindow::~MainWindow() {}
@@ -173,135 +170,68 @@ void MainWindow::slotSendButtonClicked() {
     }
     input_question_->clear();
 
+    history_->AddMessage("user", user_input);
     // Показываем вопрос пользователя в чате
     AddMessage(user_input, true);
     button_send_question_->setEnabled(false); // Блокируем кнопку на время ожидания
-
-    // Добавляем новый вопрос пользователя в историю
-    QJsonObject user_msg;
-    user_msg["role"] = "user";
-    user_msg["content"] = user_input;
-    history_.append(user_msg);
-
-    // Формируем запрос к /api/chat, чтобы передавать историю диалога
-    QNetworkRequest request;
-    request.setUrl(QUrl("http://localhost:11434/api/chat"));
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    // Собираем JSON запроса
-    QJsonObject json;
-    json["model"] = "gemma-4-12b-local";        // Запускаемая модель
-    json["messages"] = history_;                // вся история
-    json["stream"] = true;                      // Включаем потоковый режим
-
-    QByteArray post_data = QJsonDocument(json).toJson();
-    QNetworkReply *reply = manager_->post(request, post_data);
-
-    // Сохраняем указатель на текущий ответ
-    current_reply_ = reply;
-    accumulated_answer_.clear();
-    read_buffer_.clear();
 
     // Сбрасываем указатели на элементы чата
     current_item_ = nullptr;
     current_container_ = nullptr;
     current_label_ = nullptr;
+    accumulated_answer_.clear();
 
-    // Подключаем сигналы для потокового чтения
-    connect(reply, &QNetworkReply::readyRead, this, &MainWindow::slotReadyRead);
-    connect(reply, &QNetworkReply::finished, this, &MainWindow::slotStreamFinished);
-    connect(reply, &QNetworkReply::errorOccurred, this, &MainWindow::slotStreamError);
+    // Берём последние 20 сообщений (системное + 19 последних)
+    QJsonArray recent = history_->GetMessagesForRequest(20);
+    ai_manager_->SendRequest(recent);
 }
 
 // Слот для чтения очередного куска данных
-void MainWindow::slotReadyRead() {
-    if (!current_reply_) return;
-
-    // Читаем все доступные данные и добавляем в буфер
-    read_buffer_.append(current_reply_->readAll());
-
-    // Разбираем буфер построчно (каждая строка — отдельный JSON)
-    int pos;
-    while ((pos = read_buffer_.indexOf('\n')) != -1) {
-        QByteArray line = read_buffer_.left(pos);
-        read_buffer_.remove(0, pos + 1);
-
-        if (line.trimmed().isEmpty()) continue;
-
-        QJsonParseError err;
-        QJsonDocument doc = QJsonDocument::fromJson(line, &err);
-        if (err.error != QJsonParseError::NoError || doc.isNull()) {
-            // Если JSON невалидный, пропускаем
-            continue;
-        }
-
-        QJsonObject obj = doc.object();
-        QJsonObject message = obj["message"].toObject();
-        QString chunk = message["content"].toString();
-        if (!chunk.isEmpty()) {
-            accumulated_answer_.append(chunk);
-            // Обновляем или создаём сообщение ассистента
-            CreateOrUpdateAssistantMessage(accumulated_answer_);
-        }
-    }
+void MainWindow::slotChunkReceived(const QString &chunk)
+{
+    accumulated_answer_.append(chunk);
+    // Обновляем или создаём сообщение ассистента
+    CreateOrUpdateAssistantMessage(accumulated_answer_);
 }
 
-// Слот для получения ответа от AI
-void MainWindow::slotStreamFinished() {
-    if (!current_reply_) return;
+// Слот для получения финального ответа от AI
+void MainWindow::slotResponseFinished(const QString &fullText)
+{
+    QString finalAnswer = fullText.isEmpty() ? accumulated_answer_ : fullText;
 
-    if (current_reply_->error() == QNetworkReply::NoError) {
-        // Если ответ не был добавлен, создаём сейчас
-        if (!accumulated_answer_.isEmpty() && current_item_ == nullptr) {
-            CreateOrUpdateAssistantMessage(accumulated_answer_);
-        }
-
+    if (!finalAnswer.isEmpty()) {
         // Добавляем финальный ответ в историю
-        if (!accumulated_answer_.isEmpty()) {
-            QJsonObject assistant_msg;
-            assistant_msg["role"] = "assistant";
-            assistant_msg["content"] = accumulated_answer_;
-            history_.append(assistant_msg);
-
-            // Ограничиваем историю последними 20 сообщениями
-            while (history_.size() > 20) {
-                history_.removeAt(1);
-            }
+        history_->AddMessage("assistant", finalAnswer);
+        if (current_item_ == nullptr) {
+            CreateOrUpdateAssistantMessage(finalAnswer);
         } else {
-            // Пустой ответ
-            AddMessage("[пустой ответ]", false);
+            current_label_->setText(finalAnswer);
+            current_container_->adjustSize();
+            current_item_->setSizeHint(current_container_->sizeHint());
+            chat_display_->scrollToBottom();
         }
     } else {
-        AddMessage("Соединение с Ollama не удалось: " + current_reply_->errorString() +
-                                 "\nУбедитесь, что Ollama запущен и модель загружена.", false);
+        // Пустой ответ
+        AddMessage("[пустой ответ]", false);
     }
 
-    // Очищаем состояние
-    current_reply_->deleteLater();
-    current_reply_ = nullptr;
     current_item_ = nullptr;
     current_container_ = nullptr;
     current_label_ = nullptr;
     accumulated_answer_.clear();
-    read_buffer_.clear();
 
     button_send_question_->setEnabled(true); // Разблокируем кнопку
 }
 
-// Слот обработки ошибок сети
-void MainWindow::slotStreamError(QNetworkReply::NetworkError code) {
-    Q_UNUSED(code);
-    if (current_reply_) {
-        AddMessage("Ошибка сети: " + current_reply_->errorString() +
-                       "\nУбедитесь, что Ollama запущен и модель загружена.", false);
+void MainWindow::slotErrorOccurred(const QString &error_string)
+{
+    AddMessage("Ошибка сети: " + error_string +
+                   "\nУбедитесь, что Ollama запущен и модель загружена.", false);
 
-        current_reply_->deleteLater();
-        current_reply_ = nullptr;
-        current_item_ = nullptr;
-        current_container_ = nullptr;
-        current_label_ = nullptr;
-        accumulated_answer_.clear();
-        read_buffer_.clear();
-        button_send_question_->setEnabled(true);
-    }
+    current_item_ = nullptr;
+    current_container_ = nullptr;
+    current_label_ = nullptr;
+    accumulated_answer_.clear();
+
+    button_send_question_->setEnabled(true);
 }

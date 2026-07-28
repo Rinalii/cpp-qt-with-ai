@@ -2,20 +2,17 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QJsonArray>
-#include <QNetworkReply>
+
+#include "aimanager.h"
+#include "chathistory.h"
 
 // Для интерфейса
 class QListWidget;
 class QLineEdit;
 class QPushButton;
-class QVBoxLayout;
 class QListWidgetItem;
 class QLabel;
 
-// Для работы с нейросетями
-class QNetworkAccessManager;
-class QNetworkReply;
 
 class MainWindow : public QMainWindow
 {
@@ -31,31 +28,26 @@ protected:
 private slots:
     void slotSendButtonClicked();                   // Отправка вопроса нейросетке по клику
 
-    // Обработка ответа от AI
-    void slotReadyRead();
-    void slotStreamFinished();
-    void slotStreamError(QNetworkReply::NetworkError code);
+    // Слоты от AIManager
+    void slotChunkReceived(const QString &chunk);
+    void slotResponseFinished(const QString &fullText);
+    void slotErrorOccurred(const QString &errorString);
 
 private:
-    // Виджеты интерфейса
+    // UI
     QListWidget *chat_display_;
     QLineEdit *input_question_;
     QPushButton *button_send_question_;
 
-    // Сетевой менеджер
-    QNetworkAccessManager *manager_;
+    // Менеджеры
+    AIManager *ai_manager_;
+    ChatHistory *history_;
 
-    // История сообщений
-    QJsonArray history_;
-
-    // Для потокового получения ответа
-    QNetworkReply *current_reply_ = nullptr;
-    QString accumulated_answer_;
-    QListWidgetItem *current_item_ = nullptr;   // элемент списка для обновляемого сообщения
+    // Для отображения текущего сообщения ассистента
+    QListWidgetItem *current_item_ = nullptr;
     QWidget *current_container_ = nullptr;
     QLabel *current_label_ = nullptr;
-    QByteArray read_buffer_;                    // буфер для неполных строк
-
+    QString accumulated_answer_;
 
     void CreateUI();
     void AddMessage(const QString &text, bool isUser);
